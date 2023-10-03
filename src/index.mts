@@ -22,6 +22,12 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
+function randomizeTemperature(): number {
+  let num = Math.random() * 0.4 + 0.3; // Generate number between 0.3 and 0.7
+
+  return Math.round(num * 100) / 100; // Round to 2 decimal places
+}
+
 async function prompt(question: string) {
   return new Promise<string>((resolve, reject) => {
     rl.question(questionChalk(question), (answer) => {
@@ -50,7 +56,8 @@ interface MessageType {
 
 async function generation(
   gptModel: string,
-  messages: MessageType[]
+  messages: MessageType[],
+  temperature?: number
 ): Promise<[string, number]> {
   const completion = await openai.chat.completions.create({
     model: gptModel,
@@ -82,9 +89,11 @@ async function initialOutput(
   const promises = Array(outputs)
     .fill(undefined)
     .map(async (_, i) => {
-      const res = await generation(gpt3, [
-        { role: "user", content: initialPrompt },
-      ]);
+      const res = await generation(
+        useGPT4Everywhere ? gpt4 : gpt3,
+        [{ role: "user", content: initialPrompt }],
+        i === 0 ? undefined : randomizeTemperature()
+      );
 
       loading.text = `Generating answers ${progress(`${i + 1}/${outputs}`)}`;
 
@@ -112,7 +121,10 @@ async function researcher(
     { role: "user", content: prompt },
   ];
 
-  const [response, tokens] = await generation(gpt3, messages);
+  const [response, tokens] = await generation(
+    useGPT4Everywhere ? gpt4 : gpt3,
+    messages
+  );
   messages.push({ role: "assistant", content: response });
 
   return messages;
@@ -139,11 +151,10 @@ async function resolver(
 
 async function finalOutput(finalResponse: string): Promise<string> {
   const prompt = `Based on the following response, extract out only the improved response and nothing else. DO NOT include typical responses and the answer should only have the improved response: \n\n${finalResponse}`;
-  const [response, tokens] = await generation(gpt3, [
+  const modelToUse = useGPT4Everywhere ? gpt4 : gpt3;
+  const [response, tokens] = await generation(modelToUse, [
     { role: "user", content: prompt },
   ]);
-
-  tokenCounts[gpt3] += tokens;
 
   return response;
 }
@@ -178,19 +189,33 @@ const argv = await yargs(hideBin(process.argv))
     type: "number",
     description: "Number of outputs",
     choices: validRange,
+  })
+  .option("gpt4", {
+    type: "boolean",
+    description: "Use GPT-4 for all tasks",
+    default: false,
   }).argv;
 
-let outputs =
-  argv.outputs ||
-  parseInt(await prompt("Enter the # of outputs you want (1 to 4): "));
+const useGPT4Everywhere = argv.gpt4;
 
-while (!validRange.includes(outputs)) {
-  if (isNaN(outputs)) {
-    console.log(error(`\nPlease enter a valid number`));
+const outputsUserInput =
+  argv.outputs ||
+  (await prompt(
+    "Enter the desired number of answer to be compared (1 to 4)(defaults to 3): "
+  ));
+let outputs = Number(outputsUserInput);
+
+if (outputsUserInput === "") {
+  outputs = 3;
+} else {
+  while (!validRange.includes(outputs)) {
+    if (isNaN(outputs)) {
+      console.log(error(`\nPlease enter a valid number`));
+    }
+    outputs = parseInt(
+      await prompt("\nEnter the # of outputs you want (1 to 4): ")
+    );
   }
-  outputs = parseInt(
-    await prompt("\nEnter the # of outputs you want (1 to 4): ")
-  );
 }
 
 const loading = ora(`Generating answers ${progress(`${0}/${outputs}`)}`);
