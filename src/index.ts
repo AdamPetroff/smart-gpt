@@ -2,7 +2,15 @@ import OpenAI from "openai";
 import fs from "fs";
 import dotenv from "dotenv";
 import * as readline from "node:readline";
+import ora from "commonjs-ora";
+import chalk from "chalk";
+
 dotenv.config();
+
+const success = chalk.bold.green;
+const progress = chalk.bold.blue;
+const info = chalk.bold.cyan;
+const questionChalk = chalk.bold.yellow;
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -11,7 +19,7 @@ const rl = readline.createInterface({
 
 async function prompt(question: string) {
   return new Promise<string>((resolve, reject) => {
-    rl.question(question, (answer) => {
+    rl.question(questionChalk(question), (answer) => {
       resolve(answer);
     });
   });
@@ -44,7 +52,6 @@ async function generation(
     messages: messages,
     temperature: temperature,
   });
-  console.log(completion);
   const response = completion.choices[0].message.content;
   const tokens = completion.usage?.total_tokens || 0;
 
@@ -65,15 +72,29 @@ async function initialOutput(
   userInput: string,
   outputs: number
 ): Promise<[string[], string]> {
-  let responses: string[] = [];
   const initialPrompt = `Question. ${userInput}\nAnswer: Let's work this out in a step by step way to be sure we have the right answer:`;
-  for (let i = 0; i < outputs; i++) {
-    const [response, tokens] = await generation(gpt3, [
-      { role: "user", content: initialPrompt },
-    ]);
-    console.log(`Generating answers: ${i + 1}/${outputs} complete`);
-    responses.push(response);
-  }
+
+  const promises = Array(outputs)
+    .fill(undefined)
+    .map((_, i) => {
+      const loading = ora(
+        `Generating answer #${progress(`${i + 1}/${outputs}`)}`
+      ).start();
+
+      return generation(gpt3, [{ role: "user", content: initialPrompt }]).then(
+        (res) => {
+          loading.clear();
+
+          return res;
+        }
+      );
+    });
+
+  const results = await Promise.all(promises);
+
+  const responses = results.map((item) => item[0]);
+  // const tokens = results.map((item) => item[1]);
+
   return [responses, initialPrompt];
 }
 
@@ -115,11 +136,13 @@ async function resolver(
   return response;
 }
 
-async function finalOutput(finalResponse: string): Promise<void> {
+async function finalOutput(finalResponse: string): Promise<string> {
   const prompt = `Based on the following response, extract out only the improved response and nothing else. DO NOT include typical responses and the answer should only have the improved response: \n\n${finalResponse}`;
   const [response, tokens] = await generation(gpt3, [
     { role: "user", content: prompt },
   ]);
+
+  return response;
 }
 
 function saveToFile(data: string, filenamePrefix = "question"): void {
@@ -150,31 +173,37 @@ async function main(): Promise<void> {
   }
 
   const userInput = await prompt("Question: ");
-  console.log(`\n%cProcess Starting`, "color: blue");
+  console.log(progress(`Process Starting`));
 
-  console.log(userInput);
-  console.log(`Generating answers`);
+  const loading = ora(`Generating answers`).start();
+
   const [initialResponses, initialPrompt] = await initialOutput(
     userInput,
     outputs
   );
-  console.log("here");
   const answers = concatOutput(initialResponses);
 
-  console.log(`Researching answers: %c2/4 complete`, "color: green");
+  loading.text = "Researching answers";
   const researcherResponse = await researcher(answers, initialPrompt, outputs);
 
-  console.log(`Resolving answers: %c3/4 complete`, "color: green");
+  loading.text = "Resolving answers";
   const finalResponse = await resolver(researcherResponse, outputs);
+
+  loading.text = "Finalizing";
 
   const totalCalc = tokenCounts[gpt3] * rateOf3 + tokenCounts[gpt4] * rateOf4;
   const totalCost = `$${totalCalc.toFixed(2)}`;
 
-  console.log(`\nYou used ${tokenCounts[gpt3]} gpt3.5 tokens`);
-  console.log(`You used ${tokenCounts[gpt4]} gpt4 tokens`);
-  console.log(`Total Cost: ${totalCost}`);
+  console.log(info(`You used ${tokenCounts[gpt3]} gpt3.5 tokens`));
+  console.log(info(`You used ${tokenCounts[gpt4]} gpt4 tokens`));
+  console.log(info(`Total Cost: ${totalCost}`));
 
-  await finalOutput(finalResponse);
+  const finalAnswer = await finalOutput(finalResponse);
+
+  loading.clear();
+  console.log(success(`Process Complete`));
+
+  console.log(info(`Final Answer: \n\n${chalk.white(finalAnswer)}`));
 }
 
 main();
