@@ -1,9 +1,13 @@
+#!/usr/bin/env node
+
 import OpenAI from "openai";
 import fs from "fs";
 import dotenv from "dotenv";
 import * as readline from "node:readline";
 import ora from "ora";
 import chalk from "chalk";
+import { hideBin } from "yargs/helpers";
+import yargs from "yargs/yargs";
 
 dotenv.config();
 
@@ -78,13 +82,11 @@ async function initialOutput(
   const promises = Array(outputs)
     .fill(undefined)
     .map(async (_, i) => {
-      console.log(`\nGenerating answer #${progress(`${i + 1}/${outputs}`)}`);
-
       const res = await generation(gpt3, [
         { role: "user", content: initialPrompt },
       ]);
 
-      console.log(`\nAnswer #${i + 1}: ${success("ok")}`);
+      loading.text = `Generating answers ${progress(`${i + 1}/${outputs}`)}`;
 
       return res;
     });
@@ -164,36 +166,54 @@ function saveToFile(data: string, filenamePrefix = "question"): void {
 }
 
 const validRange = [1, 2, 3, 4];
-let outputs = 0;
+
+const argv = await yargs(hideBin(process.argv))
+  .option("question", {
+    alias: "q",
+    type: "string",
+    description: "Ask a question",
+  })
+  .option("outputs", {
+    alias: "o",
+    type: "number",
+    description: "Number of outputs",
+    choices: validRange,
+  }).argv;
+
+let outputs =
+  argv.outputs ||
+  parseInt(await prompt("Enter the # of outputs you want (1 to 4): "));
 
 while (!validRange.includes(outputs)) {
-  outputs = parseInt(
-    await prompt("\nEnter the # of outputs you want (1 to 4): ")
-  );
-
   if (isNaN(outputs)) {
     console.log(error(`\nPlease enter a valid number`));
   }
+  outputs = parseInt(
+    await prompt("\nEnter the # of outputs you want (1 to 4): ")
+  );
 }
 
-const userInput = await prompt("Question: ");
+const loading = ora(`Generating answers ${progress(`${0}/${outputs}`)}`);
+
+let userInput = argv.question || (await prompt("Question: "));
+
 console.log(progress(`\nProcess Starting`));
 
-const loading = ora(`Generating answers`).start();
+loading.start();
 
 const [initialResponses, initialPrompt] = await initialOutput(
   userInput,
-  outputs
+  outputs!
 );
 const answers = concatOutput(initialResponses);
 
 loading.text = "Researching answers";
 const researcherResponse = await researcher(answers, initialPrompt, outputs);
 
-loading.text = "Resolving answers";
+loading.text = "Picking the best answer";
 const finalResponse = await resolver(researcherResponse, outputs);
 
-loading.text = "Improving answer";
+loading.text = "Improving the answer";
 
 const finalAnswer = await finalOutput(finalResponse);
 
