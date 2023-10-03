@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import fs from "fs";
 import dotenv from "dotenv";
 import * as readline from "node:readline";
-import ora from "commonjs-ora";
+import ora from "ora";
 import chalk from "chalk";
 
 dotenv.config();
@@ -10,6 +10,7 @@ dotenv.config();
 const success = chalk.bold.green;
 const progress = chalk.bold.blue;
 const info = chalk.bold.cyan;
+const error = chalk.bold.red;
 const questionChalk = chalk.bold.yellow;
 
 const rl = readline.createInterface({
@@ -76,18 +77,16 @@ async function initialOutput(
 
   const promises = Array(outputs)
     .fill(undefined)
-    .map((_, i) => {
-      const loading = ora(
-        `Generating answer #${progress(`${i + 1}/${outputs}`)}`
-      ).start();
+    .map(async (_, i) => {
+      console.log(`\nGenerating answer #${progress(`${i + 1}/${outputs}`)}`);
 
-      return generation(gpt3, [{ role: "user", content: initialPrompt }]).then(
-        (res) => {
-          loading.clear();
+      const res = await generation(gpt3, [
+        { role: "user", content: initialPrompt },
+      ]);
 
-          return res;
-        }
-      );
+      console.log(`\nAnswer #${i + 1}: ${success("ok")}`);
+
+      return res;
     });
 
   const results = await Promise.all(promises);
@@ -121,7 +120,7 @@ async function resolver(
   messages: MessageType[],
   outputs: number
 ): Promise<string> {
-  const prompt = `The previous responses are from the researcher. You are a resolver tasked with 1) finding which of the ${outputs} answer options the researcher thought was best 2) improving that answer, and 3) Printing the improved answer in full. Let's work this out in a step by step way to be sure we have the right answer: `;
+  const prompt = `The previous responses are from the researcher. You are a resolver tasked with 1) finding which of the ${outputs} answer options the researcher thought was best 2) improving that answer, and 3) Printing the improved answer in full (nothing else). Let's work this out in a step by step way to be sure we have the right answer: `;
 
   messages.push({ role: "user", content: prompt });
   const [response, tokens] = await generation(gpt4, messages);
@@ -141,6 +140,8 @@ async function finalOutput(finalResponse: string): Promise<string> {
   const [response, tokens] = await generation(gpt3, [
     { role: "user", content: prompt },
   ]);
+
+  tokenCounts[gpt3] += tokens;
 
   return response;
 }
@@ -162,48 +163,50 @@ function saveToFile(data: string, filenamePrefix = "question"): void {
   );
 }
 
-async function main(): Promise<void> {
-  const validRange = [1, 2, 3, 4];
-  let outputs = 0;
+const validRange = [1, 2, 3, 4];
+let outputs = 0;
 
-  while (!validRange.includes(outputs)) {
-    outputs = parseInt(
-      await prompt("Enter the # of outputs you want (1 to 4): ")
-    );
-  }
-
-  const userInput = await prompt("Question: ");
-  console.log(progress(`Process Starting`));
-
-  const loading = ora(`Generating answers`).start();
-
-  const [initialResponses, initialPrompt] = await initialOutput(
-    userInput,
-    outputs
+while (!validRange.includes(outputs)) {
+  outputs = parseInt(
+    await prompt("\nEnter the # of outputs you want (1 to 4): ")
   );
-  const answers = concatOutput(initialResponses);
 
-  loading.text = "Researching answers";
-  const researcherResponse = await researcher(answers, initialPrompt, outputs);
-
-  loading.text = "Resolving answers";
-  const finalResponse = await resolver(researcherResponse, outputs);
-
-  loading.text = "Finalizing";
-
-  const totalCalc = tokenCounts[gpt3] * rateOf3 + tokenCounts[gpt4] * rateOf4;
-  const totalCost = `$${totalCalc.toFixed(2)}`;
-
-  console.log(info(`You used ${tokenCounts[gpt3]} gpt3.5 tokens`));
-  console.log(info(`You used ${tokenCounts[gpt4]} gpt4 tokens`));
-  console.log(info(`Total Cost: ${totalCost}`));
-
-  const finalAnswer = await finalOutput(finalResponse);
-
-  loading.clear();
-  console.log(success(`Process Complete`));
-
-  console.log(info(`Final Answer: \n\n${chalk.white(finalAnswer)}`));
+  if (isNaN(outputs)) {
+    console.log(error(`\nPlease enter a valid number`));
+  }
 }
 
-main();
+const userInput = await prompt("Question: ");
+console.log(progress(`\nProcess Starting`));
+
+const loading = ora(`Generating answers`).start();
+
+const [initialResponses, initialPrompt] = await initialOutput(
+  userInput,
+  outputs
+);
+const answers = concatOutput(initialResponses);
+
+loading.text = "Researching answers";
+const researcherResponse = await researcher(answers, initialPrompt, outputs);
+
+loading.text = "Resolving answers";
+const finalResponse = await resolver(researcherResponse, outputs);
+
+loading.text = "Improving answer";
+
+const finalAnswer = await finalOutput(finalResponse);
+
+loading.stop();
+console.log(success(`\nProcess Complete`));
+
+console.log(info(`\nFinal Answer: \n\n${chalk.white(finalAnswer)}`));
+
+const totalCalc = tokenCounts[gpt3] * rateOf3 + tokenCounts[gpt4] * rateOf4;
+const totalCost = `$${totalCalc.toFixed(2)}`;
+
+console.log(info(`\nYou used ${tokenCounts[gpt3]} gpt3.5 tokens`));
+console.log(info(`\nYou used ${tokenCounts[gpt4]} gpt4 tokens`));
+console.log(info(`\nTotal Cost (approximate): ${totalCost}`));
+
+process.exit(0);

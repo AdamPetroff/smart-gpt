@@ -10,14 +10,15 @@
     "typescript": "^5.2.2"
   },
   "scripts": {
-    "dev": "nodemon --watch 'src/**/*' -e ts,tsx --exec ts-node src/index.ts",
+    "dev": "nodemon --esm --watch 'src/**/*' -e ts,tsx --exec ts-node src/index.mts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.mjs"
   },
   "dependencies": {
-    "chalk": "4",
-    "commonjs-ora": "^1.0.2",
+    "chalk": "^5.3.0",
     "dotenv": "^16.3.1",
-    "openai": "^4.11.1"
-  }
+    "openai": "^4.11.1",
+    "ora": "^7.0.1"
+  },
+  "type": "module"
 }

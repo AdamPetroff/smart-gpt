@@ -20,6 +20,10 @@ The script will guide you interactively after you start it in the terminal.
 
 ## Examples
 
+![Example](./example.png)
+
+The answer in the example is still wrong though :D
+
 ## Technologies used
 
 - [Node.js](https://nodejs.org/en/)
